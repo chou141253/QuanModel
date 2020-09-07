@@ -496,7 +496,7 @@ def bit_conv_layer(x, model_layer, stats, num_bits, n_scale, this_layer, prvs_la
                                 bits_num=num_bits, 
                                 n_scale=n_scale)
     
-    bitconv.load_pretrain(w_pretrain=model_layer.weight.data, b_pretrain=model_layer.bias.data)    
+    bitconv.load_pretrain(w_pretrain=model_layer.weight.data, b_pretrain=model_layer.bias.data)
 
     x = F.relu(bitconv(x))
     
@@ -684,3 +684,7 @@ def bit_conv_forward(x, model, num_bits, n_scale, val_record, scale_factors_reco
     x = x.view(-1, model.classes_num)
     
     return x, weights_record, biases_record, scale_factors_record
+
+
+
+

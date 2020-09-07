@@ -69,15 +69,17 @@ class BitConv2d(nn.Module):
                 print("    building {}(int) {}(binary)"\
                     .format(down_factor, bin(down_factor).split('b')[-1].zfill(self.bits_num)))
             
+            x_bit = (x/down_factor).type(torch.int32)
+            x = x - x_bit*down_factor
+            
             if is_after:
-                tmp_bit = self.quantized((x/down_factor == 1).type(torch.int32)/N)*down_factor
+                tmp_bit = x_bit.type(torch.float32)/N
             else:
-                tmp_bit = self.quantized((x/down_factor == 1).type(torch.int32)*down_factor/N)
+                raise ValueError("is_after must be True.") # fix in future
 
             #print(self.bits_num-1-i)
 
-            bit_x[self.bits_num-1-i] = tmp_bit
-            x = x - tmp_bit*down_factor
+            bit_x[i] = tmp_bit
             down_factor = 2**(self.bits_num-2-i)
 
         if log:
@@ -113,7 +115,7 @@ class BitConv2d(nn.Module):
 
         #conv
         for bit_id in range(self.bits_num):
-            out = self.conv(x[bit_id]) 
+            out = self.quantized(self.conv(x[bit_id]))*(2**(self.bits_num-bit_id-1)) 
             #print(postquan_x.size(), x[bit_id].size(), out.size())
             postquan_x += out
 
