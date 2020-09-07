@@ -108,6 +108,8 @@ def dequantize_tensor(q_x):
 
 def get_indexs(x, index):
 
+    indexs = []
+
     for i in range(len(x.size())):
         total = 1
         for j in range(i+1, len(x.size())):
@@ -485,8 +487,8 @@ def bit_conv_layer(x, model_layer, stats, num_bits, n_scale, this_layer, prvs_la
     # original_w_and_b = [copy.deepcopy(model_layer.weight.data), copy.deepcopy(model_layer.bias.data)]
     
     # conv2d --> bit conv2d
-    bitconv = pqmodel.BitConv2d(in_feature=model_layer.weight.data.size(1), 
-                                out_feature=model_layer.weight.data.size(0),
+    bitconv = pqmodel.BitConv2d(in_features=model_layer.weight.data.size(1), 
+                                out_features=model_layer.weight.data.size(0),
                                 kernel_size=model_layer.weight.data.size(2),
                                 stride=1,
                                 padding=1,
@@ -524,7 +526,7 @@ def fit_first_layer(x, num_bits=4, min_val=None, max_val=None):
     return q_x
 
 
-def bit_conv_forward(x, model, num_bits, n_scale, val_record, scale_factors_record):
+def bit_conv_forward(x, model, num_bits, n_scale, val_record, scale_factors_record, stats):
 
     """
       x : input datas.

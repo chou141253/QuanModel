@@ -60,7 +60,8 @@ def qforward():
                                                                                                    num_bits,
                                                                                                    n_scale,
                                                                                                    val_record,
-                                                                                                   scale_factors_record)
+                                                                                                   scale_factors_record,
+                                                                                                   stats)
                     model.conv1.weight.data = weights_record[0]
                     model.conv2.weight.data = weights_record[1]
                     model.conv3.weight.data = weights_record[2]
