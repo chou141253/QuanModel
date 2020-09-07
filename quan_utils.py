@@ -408,10 +408,10 @@ def bit_shift(x, keep_bits_num):
     x = torch.floor(x/(2**(shift)))
     return x, shift
 
-def ScalebyM(x, M, shift):
+def ScalebyM(x, M, shift, bits_num):
     # x = M*x
     x = M*x*(2**(shift))
-    x.clamp_(0, 7).round_()
+    x.clamp_(0, 2**(bits_num)-1).round_()
     return x
     
 def get_M(stats, s2, this_layer, prvs_layer, num_bits):
@@ -508,7 +508,7 @@ def bit_conv_layer(x, model_layer, stats, num_bits, n_scale, this_layer, prvs_la
     
     # x, shift = bit_shift(x, keep_bits_num=num_bits) # bit-shift
     # shift = 0
-    x = ScalebyM(x, M, shift=0) # mulipy M # Scaling
+    x = ScalebyM(x, M, shift=0, bits_num=num_bits) # mulipy M # Scaling
 
     return x, scale_factors_record
 
