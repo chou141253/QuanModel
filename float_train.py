@@ -13,11 +13,11 @@ import os
 
 torch.cuda.empty_cache()
 
-from float_model import Net
+from float_model import Net, Net_fuse3, LeNet5_float, LeNet_fuse
 from quan_utils import *
 
 
-FLOAT_MODEL_SAVE_PATH = './data_float/cifar10_float.pt'
+FLOAT_MODEL_SAVE_PATH = './data_float/'
 QUAN_MODEL_SAVE_PATH = './data_quan/'
 
 
@@ -54,35 +54,62 @@ def test(model, device, loader):
     print("    * Testing average loss: {:.4f}, average accuracy: {:.2f}%".format(test_loss, 100*correct))
 
 
-def train_float():
+def train_float(model_name):
     epoches = 60
     batch_size = 128
     data_size = 32
     device = 'cpu' # default device name
     if torch.cuda.is_available():
         device = 'cuda:0'
-    model = Net(features_num=128, classes_num=10, dsize=32) # create model
-    model = model.to(device)
 
-    transform = transforms.Compose(
-            [transforms.RandomHorizontalFlip(),
-             transforms.RandomCrop(size=32, padding=4),
-             transforms.ToTensor(),
-             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.24703, 0.24349, 0.26159))])
+    if model_name == 'Net-128':
+        model = Net(features_num=128, classes_num=10, dsize=32) # create model
+        model = model.to(device)
+    elif model_name == 'Lenet-5':
+        # only on mnist
+        model = LeNet5_float()
+        model = model.to(device)
+    else:
+        raise ValueError("Not this model.", model_name)
 
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                            download=True, transform=transform)
 
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                              shuffle=True, num_workers=4)
+    if model_name == 'Net-128':
+        transform = transforms.Compose(
+                [transforms.RandomHorizontalFlip(),
+                 transforms.RandomCrop(size=32, padding=4),
+                 transforms.ToTensor(),
+                 transforms.Normalize((0.4914, 0.4822, 0.4465), (0.24703, 0.24349, 0.26159))])
 
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+        trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                                download=True, transform=transform)
 
-    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                             shuffle=False, num_workers=4)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
+                                                  shuffle=True, num_workers=4)
+
+        testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+
+        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
+                                                 shuffle=False, num_workers=4)
+    elif model_name == 'Lenet-5':
+        transform = transforms.Compose(
+                [transforms.ToTensor(),
+                 transforms.Normalize((0.1307,), (0.3081,))])
+
+        trainset = torchvision.datasets.MNIST(root='./data', train=True,
+                                                download=True, transform=transform)
+
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
+                                                  shuffle=True, num_workers=4)
+
+        testset = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+
+        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
+                                                 shuffle=False, num_workers=4)
+
+
 
     #classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.AdamW(model.parameters(), lr=1e-4)
 
     for e in range(epoches):
         print("epoch: {}".format(e))
@@ -93,20 +120,32 @@ def train_float():
         test(model=model, device=device, loader=testloader)
         print("testing done.\n")
 
-    torch.save(model, FLOAT_MODEL_SAVE_PATH)
+    if model_name == 'Net-128':
+        torch.save(model, FLOAT_MODEL_SAVE_PATH+"/cifar10_float.pt")
+    elif model_name == 'Lenet-5':
+        torch.save(model, FLOAT_MODEL_SAVE_PATH+"/mnist_float.pt")
+
     print("save float model to ", FLOAT_MODEL_SAVE_PATH)
 
-def merge_convbn():
+def merge_convbn(model_name):
 
     device = 'cpu'
     if torch.cuda.is_available():
         device = 'cuda:0'
-    model = torch.load(FLOAT_MODEL_SAVE_PATH).to(device)
 
-    model_fuse3 = Net_fuse3(model=copy.deepcopy(model.to('cpu')), features_num=128, classes_num=10, dsize=32)
-    model_fuse3 = model_fuse3.to(device)
+    if model_name == 'Net-128':
+        model = torch.load(FLOAT_MODEL_SAVE_PATH+"/cifar10_float.pt").to(device)
+        model_fuse3 = Net_fuse3(model=copy.deepcopy(model.to('cpu')), features_num=128, classes_num=10, dsize=32)
+        model_fuse3 = model_fuse3.to(device)
+        return model_fuse3
+    elif model_name == 'Lenet-5':
+        model = torch.load(FLOAT_MODEL_SAVE_PATH+"/mnist_float.pt").to(device)
+        model_fuse = LeNet_fuse(model=copy.deepcopy(model.to('cpu')))
+        model_fuse = model_fuse.to(device)
+        return model_fuse
+    else:
+        raise ValueError("Not this model.", model_name)
 
-    return model_fuse3
 
 def adjust_learning_rate(optimizer, epoch, init_lr, adjustlr_rate):   
     """Sets the learning rate to the initial LR decayed by 10 every 15 epochs"""
@@ -130,7 +169,7 @@ def save_stat(stats, save_path):
     with open(save_path, "w") as fjson:
         fjson.write(json.dumps(stats, indent=2))
 
-def trainQuantAware(model, device, train_loader, optimizer, epoch, stats, act_quant=False, num_bits=4, records=None):
+def trainQuantAware(model, model_name, device, train_loader, optimizer, epoch, stats, act_quant=False, num_bits=8, records=None):
     model.train()
     train_loss = 0
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -138,50 +177,8 @@ def trainQuantAware(model, device, train_loader, optimizer, epoch, stats, act_qu
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         
-        output, stats, conv1weight, conv2weight, conv3weight, conv4weight, conv5weight,\
-        conv6weight, conv7weight, conv8weight, conv9weight, conv10weight, conv11weight, conv12weight,\
-        classifier_weight = quantAwareTrainingForward(model, data, stats, num_bits=num_bits, act_quant=act_quant)
-
-        model.conv1.weight.data = conv1weight
-        model.conv2.weight.data = conv2weight
-        model.conv3.weight.data = conv3weight
-        model.conv4.weight.data = conv4weight
-        model.conv5.weight.data = conv5weight
-        model.conv6.weight.data = conv6weight
-        model.conv7.weight.data = conv7weight
-        model.conv8.weight.data = conv8weight
-        model.conv9.weight.data = conv9weight
-        model.conv10.weight.data = conv10weight
-        model.conv11.weight.data = conv11weight
-        model.conv12.weight.data = conv12weight
-        model.classifier.weight.data = classifier_weight
-    
-        output = output.view(target.size(0), -1)
-        
-        #print("training prediction: {}".format(output))
-        loss = F.nll_loss(output, target)
-        loss.backward()
-        optimizer.step()
-        
-        if batch_idx%50 == 0:
-            records['train']['loss'].append(loss.item())
-
-        if batch_idx%100 == 0:
-            print('Train Epoch: {}   [{}/{} ({:3.0f}%)]  Loss: {:.6f}'.format(
-                epoch, str(batch_idx*len(data)).zfill(5), len(train_loader.dataset),
-                100.*batch_idx/len(train_loader), loss.item()))
-    
-    return stats, records
-
-def testQuantAware(model, device, test_loader, stats, act_quant, num_bits=4):
-    model.eval()
-    test_loss = 0
-    correct = 0
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            
-            output, _, conv1weight, conv2weight, conv3weight, conv4weight, conv5weight,\
+        if model_name == 'Net-128':
+            output, stats, conv1weight, conv2weight, conv3weight, conv4weight, conv5weight,\
             conv6weight, conv7weight, conv8weight, conv9weight, conv10weight, conv11weight, conv12weight,\
             classifier_weight = quantAwareTrainingForward(model, data, stats, num_bits=num_bits, act_quant=act_quant)
 
@@ -198,10 +195,76 @@ def testQuantAware(model, device, test_loader, stats, act_quant, num_bits=4):
             model.conv11.weight.data = conv11weight
             model.conv12.weight.data = conv12weight
             model.classifier.weight.data = classifier_weight
-            
+        
             output = output.view(target.size(0), -1)
-            #print("testingprediction: {}".format(output))
+
+        elif model_name == 'Lenet-5':
+            output, stats, conv1weight, conv2weight,\
+            conv3weight = quantAwareTrainingForward_LeNet(model, data, stats, num_bits=num_bits, act_quant=act_quant)
+
+            model.conv1.weight.data = conv1weight
+            model.conv2.weight.data = conv2weight
+            model.conv3.weight.data = conv3weight
+
+            output = output.view(target.size(0), -1)
+
+
+        #print("training prediction: {}".format(output))
+        loss = F.nll_loss(output, target)
+        loss.backward()
+        optimizer.step()
+        
+        if batch_idx%50 == 0:
+            records['train']['loss'].append(loss.item())
+
+        if batch_idx%100 == 0:
+            print('Train Epoch: {}   [{}/{} ({:3.0f}%)]  Loss: {:.6f}'.format(
+                epoch, str(batch_idx*len(data)).zfill(5), len(train_loader.dataset),
+                100.*batch_idx/len(train_loader), loss.item()))
+    
+    return stats, records
+
+def testQuantAware(model, model_name, device, test_loader, stats, act_quant, num_bits=4):
+    model.eval()
+    test_loss = 0
+    correct = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
             
+            if model_name == 'Net-128':
+                output, _, conv1weight, conv2weight, conv3weight, conv4weight, conv5weight,\
+                conv6weight, conv7weight, conv8weight, conv9weight, conv10weight, conv11weight, conv12weight,\
+                classifier_weight = quantAwareTrainingForward(model, data, stats, num_bits=num_bits, act_quant=act_quant)
+
+                model.conv1.weight.data = conv1weight
+                model.conv2.weight.data = conv2weight
+                model.conv3.weight.data = conv3weight
+                model.conv4.weight.data = conv4weight
+                model.conv5.weight.data = conv5weight
+                model.conv6.weight.data = conv6weight
+                model.conv7.weight.data = conv7weight
+                model.conv8.weight.data = conv8weight
+                model.conv9.weight.data = conv9weight
+                model.conv10.weight.data = conv10weight
+                model.conv11.weight.data = conv11weight
+                model.conv12.weight.data = conv12weight
+                model.classifier.weight.data = classifier_weight
+                
+                output = output.view(target.size(0), -1)
+            
+
+            elif model_name == 'Lenet-5':
+                output, stats, conv1weight, conv2weight,\
+                conv3weight = quantAwareTrainingForward_LeNet(model, data, stats, num_bits=num_bits, act_quant=act_quant)
+
+                model.conv1.weight.data = conv1weight
+                model.conv2.weight.data = conv2weight
+                model.conv3.weight.data = conv3weight
+
+                output = output.view(target.size(0), -1)
+
+            #print("testingprediction: {}".format(output))
             test_loss += F.nll_loss(output, target, reduction='sum').item() # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True) # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
@@ -215,22 +278,34 @@ def testQuantAware(model, device, test_loader, stats, act_quant, num_bits=4):
     return 100.*correct/len(test_loader.dataset), test_loss
 
 
-def train_quan(model_fuse):
-    
+def train_quan(model_fuse, model_name):
+    device = 'cpu' # default device name
+    if torch.cuda.is_available():
+        device = 'cuda:0'
+
     batch_size = 128
-    transform = transforms.Compose(
-        [transforms.ToTensor(),
-         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.24703, 0.24349, 0.26159))])
 
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+    if model_name == 'Net-128':
+        transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.24703, 0.24349, 0.26159))])
 
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=4)
+        trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=4)
 
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+        testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=4)
+        #classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    elif model_name == 'Lenet-5':
+        transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize((0.1307,), (0.3081,))])
 
-    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=4)
+        trainset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=4)
 
-    #classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+        testset = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=4)
 
 
     model = copy.deepcopy(model_fuse)
@@ -244,8 +319,14 @@ def train_quan(model_fuse):
     stats = {}
 
     init_lr = 0.001
-    best_model_path = QUAN_MODEL_SAVE_PATH+"/cifar10_qun{}_best.pt".format(num_bits) # to save best accuracy model
-    best_model_path_noq = QUAN_MODEL_SAVE_PATH+"/cifar10_qun{}_noq_best.pt".format(num_bits) # to save best accuracy model
+    
+    if model_name == 'Net-128':
+        best_model_path = QUAN_MODEL_SAVE_PATH+"/cifar10_qun{}_best.pt".format(num_bits) # to save best accuracy model
+        best_model_path_noq = QUAN_MODEL_SAVE_PATH+"/cifar10_qun{}_noq_best.pt".format(num_bits) # to save best accuracy model
+    elif model_name == 'Lenet-5':
+        best_model_path = QUAN_MODEL_SAVE_PATH+"/mnist_qun{}_best.pt".format(num_bits) # to save best accuracy model
+        best_model_path_noq = QUAN_MODEL_SAVE_PATH+"/mnist_qun{}_noq_best.pt".format(num_bits) # to save best accuracy model
+
     max_correct, max_correct_noq = -1, -1
     adjustlr_rate = 30
     epochs = 60
@@ -266,9 +347,10 @@ def train_quan(model_fuse):
         
         print("**Start epoch: {}, activation quant: {}, learning rate: {:.6f}. ".format(epoch+1, act_quant, lr_now))
         
-        stats, records = trainQuantAware(model, device, trainloader, optimizer, epoch+1, stats, act_quant, num_bits=num_bits, records=records)
+        stats, records = trainQuantAware(model, model_name, device, trainloader, optimizer, epoch+1, stats, act_quant, num_bits=num_bits, records=records)
+        corrects, test_loss = testQuantAware(model, model_name, device, testloader, stats, act_quant, num_bits=num_bits)
+    
 
-        corrects, test_loss = testQuantAware(model, device, testloader, stats, act_quant, num_bits=num_bits)
         records['test']['acc'].append(corrects) # record testing accuracy per epoch
         records['test']['loss'].append(test_loss) # record testing loss per epoch
         
@@ -296,6 +378,6 @@ def train_quan(model_fuse):
 
 if __name__ == "__main__":
 
-    train_float()
-    model_fuse3 = merge_convbn()
-    train_quan(model_fuse3)
+    train_float('Lenet-5')
+    model_fuse = merge_convbn('Lenet-5')
+    train_quan(model_fuse, 'Lenet-5')

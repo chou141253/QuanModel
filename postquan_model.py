@@ -56,7 +56,7 @@ class BitConv2d(nn.Module):
     def separate_to_bits(self, x, N, is_after=True, log=False):
         """
         see print_binary.py to find detial.
-        is_after: 最後在乘以 2^(bit_num)嗎? (bits shift).
+        is_after: 最後再乘以 2^(bit_num)嗎? (bits shift).
         """
 
         bit_x = torch.zeros([self.bits_num, x.size(0), x.size(1), x.size(2), x.size(3)],dtype=torch.float32)

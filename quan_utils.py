@@ -359,6 +359,64 @@ def quantAwareTrainingForward(model, x, stats, num_bits=8, act_quant=False):
            conv6weight, conv7weight, conv8weight, conv9weight, conv10weight, conv11weight, conv12weight, classifier_weight
 
 
+def quantAwareTrainingForward_LeNet(model, x, stats, num_bits=8, act_quant=False):
+    
+    with torch.no_grad():
+        stats = updateStats(x.clone().view(x.shape[0], -1), stats, 'inputs')
+
+    if act_quant:
+        x = FakeQuantOp.apply(x, num_bits, stats['inputs']['ema_min'], stats['inputs']['ema_max'])
+    
+    """ 1 layer """
+    conv1weight = model.conv1.weight.data
+    model.conv1.weight.data = FakeQuantOp_w.apply(model.conv1.weight.data, num_bits) # quantized weight
+    x = F.relu(model.conv1(x)) # use quantized weight to do convolution
+
+    with torch.no_grad():
+        stats = updateStats(x.clone().view(x.shape[0], -1), stats, 'conv1')
+
+    if act_quant:
+        x = FakeQuantOp.apply(x, num_bits, stats['conv1']['ema_min'], stats['conv1']['ema_max'])
+    
+    x = F.max_pool2d(x, 2, 2)
+
+    """ 2 layer """
+    conv2weight = model.conv2.weight.data
+    model.conv2.weight.data = FakeQuantOp_w.apply(model.conv2.weight.data, num_bits)
+    x = F.relu(model.conv2(x))
+
+    with torch.no_grad():
+        stats = updateStats(x.clone().view(x.shape[0], -1), stats, 'conv2')
+
+    if act_quant:
+        x = FakeQuantOp.apply(x, num_bits, stats['conv2']['ema_min'], stats['conv2']['ema_max'])
+
+    x = F.max_pool2d(x, 2, 2)
+            
+    """ 3 layer """
+    conv3weight = model.conv3.weight.data
+    model.conv3.weight.data = FakeQuantOp_w.apply(model.conv3.weight.data, num_bits)
+    x = F.relu(model.conv3(x))
+
+    with torch.no_grad():
+        stats = updateStats(x.clone().view(x.shape[0], -1), stats, 'conv3')
+
+    if act_quant:
+        x = FakeQuantOp.apply(x, num_bits, stats['conv3']['ema_min'], stats['conv3']['ema_max']) 
+    
+    """ fullyconnected layer """
+    x = x.view(-1, 120)
+    x = F.relu(model.fc1(x))
+    x = model.fc2(x)
+
+    
+    return F.log_softmax(x, dim=1), stats, conv1weight, conv2weight, conv3weight
+
+
+
+
+
+
 def fit_biases(x, s1, s2, mode=1):
     if mode == 0:
         x = x*0

@@ -13,6 +13,43 @@ torch.cuda.empty_cache()
 
 from my_transforms import Float2Uint
 
+
+class LeNet5_float(nn.Module):
+
+    def __init__(self):
+        super(LeNet5_float, self).__init__()
+        self.conv1 = nn.Conv2d(1, 6, 5, stride=1, padding=2, bias=False)
+        self.bn1 = nn.BatchNorm2d(6, eps=0.00001, momentum=0.1)
+        self.conv2 = nn.Conv2d(6, 16, 5, stride=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(16, eps=0.00001, momentum=0.1)
+        self.conv3 = nn.Conv2d(16, 120, 5, stride=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(120, eps=0.00001, momentum=0.1)
+
+        self.fc1 = nn.Linear(120, 84)
+        self.fc2 = nn.Linear(84, 10)
+
+        self.d1 = nn.Dropout(0.5)
+
+    def forward(self, x):
+        # Lenet-5 Conv1
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.max_pool2d(x, 2, 2)
+        # Lenet-5 Conv2
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.max_pool2d(x, 2, 2)
+        # Lenet-5 Conv3
+        x = F.relu(self.bn3(self.conv3(x)))
+
+        x = x.view(-1, 120)
+
+        x = F.relu(self.fc1(x))
+        x = self.d1(x)
+        x = self.fc2(x)
+
+        return F.log_softmax(x, dim=1)
+
+
+
 class Net(nn.Module):
     
     def __init__(self, features_num=128, classes_num=10, dsize=32):
@@ -155,5 +192,40 @@ class Net_fuse3(nn.Module):
         x = self.classifier(x)
         
         x = x.view(-1, self.classes_num)
+        
+        return F.log_softmax(x, dim=1)
+
+
+
+class LeNet_fuse(nn.Module):
+    
+    def __init__(self, model):
+        
+        super(LeNet_fuse, self).__init__()
+        
+        self.conv1 = fuse(model.conv1, model.bn1)
+        self.conv2 = fuse(model.conv2, model.bn2)
+        self.conv3 = fuse(model.conv3, model.bn3)
+
+        #self.classifier = fuse(model.classifier, model.bn_classifier)
+        self.fc1 = copy.deepcopy(model.fc1)
+        self.fc2 = copy.deepcopy(model.fc2)
+
+        
+    def forward(self, x):
+        
+        # Lenet-5 Conv1
+        x = F.relu(self.conv1(x))
+        x = F.max_pool2d(x, 2, 2)
+        # Lenet-5 Conv2
+        x = F.relu(self.conv2(x))
+        x = F.max_pool2d(x, 2, 2)
+        # Lenet-5 Conv3
+        x = F.relu(self.conv3(x))
+
+        x = x.view(-1, 120)
+
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
         
         return F.log_softmax(x, dim=1)
